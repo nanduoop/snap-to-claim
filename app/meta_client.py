@@ -26,12 +26,16 @@ def _data_url(image_path):
     return f"data:{mime};base64,{b64}"
 
 
-def chat(prompt, image_path=None, tools=None, model=CHAT_MODEL):
+def chat(prompt, image_path=None, tools=None, model=CHAT_MODEL, system=None, tool_choice=None):
     content = [{"type": "text", "text": prompt}]
     if image_path:
         content.append({"type": "image_url", "image_url": {"url": _data_url(image_path)}})
-    messages = [{"role": "user", "content": content}]
-    resp = client.chat.completions.create(model=model, messages=messages, tools=tools)
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": content})
+    kwargs = {"tool_choice": tool_choice} if tool_choice is not None else {}
+    resp = client.chat.completions.create(model=model, messages=messages, tools=tools, **kwargs)
     return resp.choices[0].message
 
 

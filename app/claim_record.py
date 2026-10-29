@@ -19,6 +19,7 @@ class ClaimRecord:
         self.status = "open"
         self.evidence_request = None
         self.preview = None
+        self.survey = None
         self._n_part = 0
         self._n_finding = 0
         self._n_item = 0
@@ -91,6 +92,7 @@ class ClaimRecord:
             "status": self.status,
             "evidence_request": self.evidence_request,
             "preview": self.preview,
+            "survey": self.survey,
         }
 
     def save(self, path):
@@ -100,7 +102,10 @@ class ClaimRecord:
     @classmethod
     def load(cls, path):
         with open(path) as f:
-            d = json.load(f)
+            return cls.from_dict(json.load(f))
+
+    @classmethod
+    def from_dict(cls, d):
         r = cls(d.get("claim_id", "claim1"))
         r.photos = d.get("photos", [])
         r.parts = d.get("parts", [])
@@ -109,6 +114,7 @@ class ClaimRecord:
         r.status = d.get("status", "open")
         r.evidence_request = d.get("evidence_request")
         r.preview = d.get("preview")
+        r.survey = d.get("survey")
         r._n_part = len(r.parts)
         r._n_finding = len(r.findings)
         r._n_item = len(r.line_items)

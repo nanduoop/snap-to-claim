@@ -4,6 +4,7 @@ import re
 
 from PIL import Image
 
+from claim_record import load_prices
 from meta_client import chat, edit_image, segment
 
 TOOLS = [
@@ -13,6 +14,8 @@ TOOLS = [
     {"type": "function", "function": {"name": "request_evidence", "description": "Stop and ask the user for another photo.", "parameters": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]}}},
     {"type": "function", "function": {"name": "render_repair_preview", "description": "Render repaired-car preview.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "submit_claim", "description": "Submit the claim for verification.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "survey_photo", "description": "Survey the full photo for damaged and missing parts.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "record_missing_part", "description": "Record a part that is missing entirely (no box).", "parameters": {"type": "object", "properties": {"part": {"type": "string"}, "rationale": {"type": "string"}, "severity": {"type": "string"}}, "required": ["part", "rationale"]}}},
 ]
 
 
@@ -54,6 +57,8 @@ def inspect_part(record, part_id, crop_dir=None):
     part = next((p for p in record.parts if p["id"] == part_id), None)
     if not part:
         return {"error": f"unknown part_id {part_id}"}
+    if part.get("box") is None:
+        return {"error": f"part {part_id} is missing, no box to inspect"}
     photo = part.get("photo") or (record.photos[-1] if record.photos else None)
     img = Image.open(photo)
     crop = img.crop(_pixels(part["box"], img.width, img.height))
@@ -107,6 +112,35 @@ def submit_claim(record):
             "line_items": record.line_items, "findings": record.findings}
 
 
+def survey_photo(record):
+    if not record.photos:
+        return {"error": "no photo"}
+    prompt = (
+        "You are a vehicle damage inspector. Look at this full photo of a car. "
+        "List which parts look DAMAGED and which parts appear MISSING entirely (e.g. torn-off bumper). "
+        "Part names must be from: hood, bumper, fender, door, windshield, headlight, tire, mirror. "
+        'Return ONLY JSON: {"damaged": ["part", ...], "missing": ["part", ...], "notes": "one sentence"}.'
+    )
+    text = getattr(chat(prompt, image_path=record.photos[-1]), "content", "") or ""
+    try:
+        j = _parse_json(text)
+    except Exception as e:
+        return {"error": f"bad JSON: {e}", "raw": text[:300]}
+    record.survey = j
+    return j
+
+
+def record_missing_part(record, part, rationale, severity="moderate"):
+    prices = load_prices()
+    if part not in prices:
+        return {"error": f"unknown part '{part}'. Use one of: {sorted(prices)}"}
+    if severity not in ("minor", "moderate", "severe"):
+        return {"error": f"bad severity '{severity}'"}
+    pid = record.add_part(part, None)
+    fid = record.add_finding(pid, "missing", severity, rationale)
+    return {"part_id": pid, "finding_id": fid, "part": part, "damage": "missing", "severity": severity}
+
+
 DISPATCH = {
     "segment_parts": segment_parts,
     "inspect_part": inspect_part,
@@ -114,4 +148,6 @@ DISPATCH = {
     "request_evidence": request_evidence,
     "render_repair_preview": render_repair_preview,
     "submit_claim": submit_claim,
+    "survey_photo": survey_photo,
+    "record_missing_part": record_missing_part,
 }
