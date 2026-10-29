@@ -98,8 +98,8 @@ def _run_loop(claim_id, record, history, turn, max_turns, on_turn):
             status = "needs_input"
             _save_state(state_path, claim_id, turn, status, history, record)
             break
-        if act_name == "submit_claim":
-            status = "submitted"
+        if act_name == "submit_claim" and isinstance(observe, dict) and observe.get("status") in ("awaiting_signoff", "escalated"):
+            status = observe["status"]
             _save_state(state_path, claim_id, turn, status, history, record)
             break
         _save_state(state_path, claim_id, turn, status, history, record)
@@ -120,7 +120,7 @@ def resume_run(claim_id, new_image_path=None, max_turns=30, on_turn=None):
     state_path = os.path.join(STATE_DIR, f"{claim_id}.json")
     with open(state_path) as f:
         d = json.load(f)
-    if d.get("status") == "submitted":
+    if d.get("status") in ("awaiting_signoff", "escalated"):
         return d
     record = ClaimRecord.from_dict(d["record"])
     if new_image_path:

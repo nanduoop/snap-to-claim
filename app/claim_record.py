@@ -20,6 +20,8 @@ class ClaimRecord:
         self.evidence_request = None
         self.preview = None
         self.survey = None
+        self.dismissals = []
+        self.refusals = 0
         self._n_part = 0
         self._n_finding = 0
         self._n_item = 0
@@ -52,6 +54,11 @@ class ClaimRecord:
         }
         self.findings.append(finding)
         return finding["id"]
+
+    def add_dismissal(self, part, reason):
+        entry = {"part": part, "reason": reason}
+        self.dismissals.append(entry)
+        return entry
 
     def add_line_item(self, finding_id, low=None, high=None):
         finding = next((x for x in self.findings if x["id"] == finding_id), None)
@@ -93,6 +100,8 @@ class ClaimRecord:
             "evidence_request": self.evidence_request,
             "preview": self.preview,
             "survey": self.survey,
+            "dismissals": self.dismissals,
+            "refusals": self.refusals,
         }
 
     def save(self, path):
@@ -115,6 +124,8 @@ class ClaimRecord:
         r.evidence_request = d.get("evidence_request")
         r.preview = d.get("preview")
         r.survey = d.get("survey")
+        r.dismissals = d.get("dismissals", [])
+        r.refusals = d.get("refusals", 0)
         r._n_part = len(r.parts)
         r._n_finding = len(r.findings)
         r._n_item = len(r.line_items)

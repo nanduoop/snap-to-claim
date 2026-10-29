@@ -4,6 +4,7 @@ import re
 
 from PIL import Image
 
+from boxes import box_pixels
 from claim_record import load_prices
 from meta_client import chat, edit_image, segment
 
@@ -16,22 +17,8 @@ TOOLS = [
     {"type": "function", "function": {"name": "submit_claim", "description": "Submit the claim for verification.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "survey_photo", "description": "Survey the full photo for damaged and missing parts.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "record_missing_part", "description": "Record a part that is missing entirely (no box).", "parameters": {"type": "object", "properties": {"part": {"type": "string"}, "rationale": {"type": "string"}, "severity": {"type": "string"}}, "required": ["part", "rationale"]}}},
+    {"type": "function", "function": {"name": "dismiss_part", "description": "Explicitly decline to claim a surveyed part, with reason.", "parameters": {"type": "object", "properties": {"part": {"type": "string"}, "reason": {"type": "string"}}, "required": ["part", "reason"]}}},
 ]
-
-
-def _pixels(box, img_w, img_h, pad=0.10):
-    x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
-    w, h = box.get("w") or img_w, box.get("h") or img_h
-    if w != img_w:
-        x1, x2 = x1 / w * img_w, x2 / w * img_w
-    if h != img_h:
-        y1, y2 = y1 / h * img_h, y2 / h * img_h
-    if x1 > x2:
-        x1, x2 = x2, x1
-    if y1 > y2:
-        y1, y2 = y2, y1
-    pw, ph = (x2 - x1) * pad, (y2 - y1) * pad
-    return (max(0, int(x1 - pw)), max(0, int(y1 - ph)), min(img_w, int(x2 + pw)), min(img_h, int(y2 + ph)))
 
 
 def segment_parts(record, concepts, photo_path=None):
@@ -61,7 +48,7 @@ def inspect_part(record, part_id, crop_dir=None):
         return {"error": f"part {part_id} is missing, no box to inspect"}
     photo = part.get("photo") or (record.photos[-1] if record.photos else None)
     img = Image.open(photo)
-    crop = img.crop(_pixels(part["box"], img.width, img.height))
+    crop = img.crop(box_pixels(part["box"], img.width, img.height))
     crop_dir = crop_dir or "/tmp/snap_claim"
     os.makedirs(crop_dir, exist_ok=True)
     crop_path = os.path.join(crop_dir, f"{part_id}.jpg")
@@ -108,8 +95,9 @@ def render_repair_preview(record, out_path="repaired.png"):
 
 
 def submit_claim(record):
-    return {"status": "stub", "message": "verification not implemented yet",
-            "line_items": record.line_items, "findings": record.findings}
+    from verification.gate import run_gate
+    status, payload = run_gate(record)
+    return {"status": status, **payload}
 
 
 def survey_photo(record):
@@ -141,6 +129,12 @@ def record_missing_part(record, part, rationale, severity="moderate"):
     return {"part_id": pid, "finding_id": fid, "part": part, "damage": "missing", "severity": severity}
 
 
+def dismiss_part(record, part, reason):
+    if part not in load_prices():
+        return {"error": f"unknown part '{part}'"}
+    return {"dismissed": record.add_dismissal(part, reason)}
+
+
 DISPATCH = {
     "segment_parts": segment_parts,
     "inspect_part": inspect_part,
@@ -150,4 +144,5 @@ DISPATCH = {
     "submit_claim": submit_claim,
     "survey_photo": survey_photo,
     "record_missing_part": record_missing_part,
+    "dismiss_part": dismiss_part,
 }
