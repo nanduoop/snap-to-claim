@@ -16,7 +16,7 @@ def _playbook():
 
 
 def _summarize(record):
-    parts = [{"id": p["id"], "concept": p["concept"]} for p in record.parts]
+    parts = [{"id": p["id"], "concept": p["concept"], "position": p.get("position")} for p in record.parts]
     return json.dumps({
         "claim_id": record.claim_id,
         "status": record.status,

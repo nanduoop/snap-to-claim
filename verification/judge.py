@@ -27,10 +27,12 @@ def judge_findings(record, crop_dir=None):
     for finding in record.findings:
         part = parts.get(finding["part_id"])
         if part is None:
-            problems.append({"code": "ORPHAN_FINDING",
+            problems.append({"code": "ORPHAN_FINDING", "finding_ids": [finding["id"]],
                              "detail": f"finding {finding['id']} cites unknown part {finding['part_id']}"})
             continue
         concept = part["concept"]
+        if part.get("position"):
+            concept = f"{part['position']} {concept}"
         claim = f"{concept}: {finding['damage']}, {finding['severity']}"
         photo = part.get("photo") or (record.photos[-1] if record.photos else None)
         if part.get("box") is None:
@@ -47,10 +49,10 @@ def judge_findings(record, crop_dir=None):
         try:
             j = _parse_json(text)
         except Exception:
-            problems.append({"code": "JUDGE_ERROR",
+            problems.append({"code": "JUDGE_ERROR", "finding_ids": [finding["id"]],
                              "detail": f"finding {finding['id']} could not be judged"})
             continue
         if not j.get("supported"):
-            problems.append({"code": "UNSUPPORTED",
+            problems.append({"code": "UNSUPPORTED", "finding_ids": [finding["id"]],
                              "detail": f"finding {finding['id']} '{claim}' unsupported by image: {j.get('reason', '')}"})
     return problems

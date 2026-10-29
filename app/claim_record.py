@@ -21,6 +21,7 @@ class ClaimRecord:
         self.preview = None
         self.survey = None
         self.dismissals = []
+        self.withdrawals = []
         self.refusals = 0
         self._n_part = 0
         self._n_finding = 0
@@ -30,13 +31,14 @@ class ClaimRecord:
         self.photos.append(path)
         return path
 
-    def add_part(self, concept, box, photo=None):
+    def add_part(self, concept, box, photo=None, position=None):
         self._n_part += 1
         part = {
             "id": f"p{self._n_part}",
             "concept": concept,
             "box": box,
             "photo": photo or (self.photos[-1] if self.photos else None),
+            "position": position,
         }
         self.parts.append(part)
         return part["id"]
@@ -58,6 +60,17 @@ class ClaimRecord:
     def add_dismissal(self, part, reason):
         entry = {"part": part, "reason": reason}
         self.dismissals.append(entry)
+        return entry
+
+    def withdraw_finding(self, finding_id, reason):
+        finding = next((x for x in self.findings if x["id"] == finding_id), None)
+        if finding is None:
+            raise ValueError(f"unknown finding_id: {finding_id}")
+        removed = [i for i in self.line_items if i["finding_id"] == finding_id]
+        self.findings = [x for x in self.findings if x["id"] != finding_id]
+        self.line_items = [i for i in self.line_items if i["finding_id"] != finding_id]
+        entry = {"finding": finding, "line_items": removed, "reason": reason}
+        self.withdrawals.append(entry)
         return entry
 
     def add_line_item(self, finding_id, low=None, high=None):
@@ -101,6 +114,7 @@ class ClaimRecord:
             "preview": self.preview,
             "survey": self.survey,
             "dismissals": self.dismissals,
+            "withdrawals": self.withdrawals,
             "refusals": self.refusals,
         }
 
@@ -125,6 +139,7 @@ class ClaimRecord:
         r.preview = d.get("preview")
         r.survey = d.get("survey")
         r.dismissals = d.get("dismissals", [])
+        r.withdrawals = d.get("withdrawals", [])
         r.refusals = d.get("refusals", 0)
         r._n_part = len(r.parts)
         r._n_finding = len(r.findings)

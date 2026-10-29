@@ -16,8 +16,9 @@ TOOLS = [
     {"type": "function", "function": {"name": "render_repair_preview", "description": "Render repaired-car preview.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "submit_claim", "description": "Submit the claim for verification.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "survey_photo", "description": "Survey the full photo for damaged and missing parts.", "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {"name": "record_missing_part", "description": "Record a part that is missing entirely (no box).", "parameters": {"type": "object", "properties": {"part": {"type": "string"}, "rationale": {"type": "string"}, "severity": {"type": "string"}}, "required": ["part", "rationale"]}}},
+    {"type": "function", "function": {"name": "record_missing_part", "description": "Record a part that is missing entirely (no box).", "parameters": {"type": "object", "properties": {"part": {"type": "string"}, "rationale": {"type": "string"}, "severity": {"type": "string"}, "position": {"type": "string"}}, "required": ["part", "rationale"]}}},
     {"type": "function", "function": {"name": "dismiss_part", "description": "Explicitly decline to claim a surveyed part, with reason.", "parameters": {"type": "object", "properties": {"part": {"type": "string"}, "reason": {"type": "string"}}, "required": ["part", "reason"]}}},
+    {"type": "function", "function": {"name": "withdraw_finding", "description": "Drop a bad finding and its line items, with reason.", "parameters": {"type": "object", "properties": {"finding_id": {"type": "string"}, "reason": {"type": "string"}}, "required": ["finding_id", "reason"]}}},
 ]
 
 
@@ -53,8 +54,11 @@ def inspect_part(record, part_id, crop_dir=None):
     os.makedirs(crop_dir, exist_ok=True)
     crop_path = os.path.join(crop_dir, f"{part_id}.jpg")
     crop.save(crop_path)
+    label = part["concept"]
+    if part.get("position"):
+        label = f"{part['position']} {label}"
     prompt = (
-        f"You are a vehicle damage inspector. This is a crop of the car's {part['concept']}. "
+        f"You are a vehicle damage inspector. This is a crop of the car's {label}. "
         'Return ONLY JSON: {"damaged": true/false, "damage": "scratch|dent|crack|crushed|missing|none", '
         '"severity": "minor|moderate|severe|none", "rationale": "one sentence"}.'
     )
@@ -118,15 +122,27 @@ def survey_photo(record):
     return j
 
 
-def record_missing_part(record, part, rationale, severity="moderate"):
+def record_missing_part(record, part, rationale, severity="moderate", position=None):
     prices = load_prices()
     if part not in prices:
         return {"error": f"unknown part '{part}'. Use one of: {sorted(prices)}"}
     if severity not in ("minor", "moderate", "severe"):
         return {"error": f"bad severity '{severity}'"}
-    pid = record.add_part(part, None)
+    if position is not None and position not in ("front", "rear", "left", "right"):
+        return {"error": f"bad position '{position}'"}
+    pid = record.add_part(part, None, position=position)
     fid = record.add_finding(pid, "missing", severity, rationale)
-    return {"part_id": pid, "finding_id": fid, "part": part, "damage": "missing", "severity": severity}
+    return {"part_id": pid, "finding_id": fid, "part": part, "damage": "missing",
+            "severity": severity, "position": position}
+
+
+def withdraw_finding(record, finding_id, reason):
+    try:
+        entry = record.withdraw_finding(finding_id, reason)
+    except ValueError as e:
+        return {"error": str(e)}
+    return {"withdrawn": finding_id,
+            "removed_line_items": [i["id"] for i in entry["line_items"]]}
 
 
 def dismiss_part(record, part, reason):
@@ -145,4 +161,5 @@ DISPATCH = {
     "survey_photo": survey_photo,
     "record_missing_part": record_missing_part,
     "dismiss_part": dismiss_part,
+    "withdraw_finding": withdraw_finding,
 }

@@ -8,34 +8,38 @@ def check_rules(record):
     try:
         prices = load_prices()
     except Exception:
-        return [{"code": "PRICE_TABLE_UNREADABLE", "detail": "price table could not be loaded"}]
+        return [{"code": "PRICE_TABLE_UNREADABLE", "finding_ids": [],
+                 "detail": "price table could not be loaded"}]
 
     for item in record.line_items:
         f = findings.get(item.get("finding_id"))
         if f is None:
-            problems.append({"code": "ORPHAN_ITEM",
+            problems.append({"code": "ORPHAN_ITEM", "finding_ids": [],
                              "detail": f"line item {item.get('id')} cites unknown finding {item.get('finding_id')}"})
             continue
         part = parts.get(f["part_id"])
         concept = part["concept"] if part else None
         table = prices.get(concept, {}).get(f["damage"], {}).get(f["severity"])
         if table is None or [item.get("low"), item.get("high")] != list(table):
-            problems.append({"code": "PRICE_MISMATCH",
+            problems.append({"code": "PRICE_MISMATCH", "finding_ids": [f["id"]],
                              "detail": f"line item {item.get('id')} price is not from the price table"})
 
-    claimed = {}
+    by_part = {}
     for item in record.line_items:
         f = findings.get(item.get("finding_id"))
         if f is None:
             continue
-        part = parts.get(f["part_id"])
-        if part is None:
-            continue
-        claimed.setdefault(part["concept"], set()).add(f["damage"])
-    for concept, damages in sorted(claimed.items()):
+        by_part.setdefault(f["part_id"], []).append(f)
+    for part_id, fs in sorted(by_part.items()):
+        damages = {f["damage"] for f in fs}
         if len(damages) > 1:
+            part = parts.get(part_id, {})
+            label = part.get("concept", part_id)
+            if part.get("position"):
+                label += f" {part['position']}"
             problems.append({"code": "CONFLICT",
-                             "detail": f"part '{concept}' claimed with conflicting damages: {sorted(damages)}"})
+                             "finding_ids": sorted(f["id"] for f in fs),
+                             "detail": f"part '{part_id}' ({label}) claimed with conflicting damages: {sorted(damages)}"})
 
     survey = record.survey or {}
     surveyed = {str(s).strip().lower() for s in (survey.get("damaged") or []) + (survey.get("missing") or [])}
@@ -47,7 +51,7 @@ def check_rules(record):
     dismissed = {str(d.get("part")).strip().lower() for d in record.dismissals}
     for s in sorted(surveyed):
         if s not in found and s not in dismissed:
-            problems.append({"code": "COVERAGE_GAP",
+            problems.append({"code": "COVERAGE_GAP", "finding_ids": [],
                              "detail": f"surveyed part '{s}' has no finding or dismissal"})
 
     return problems
