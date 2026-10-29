@@ -19,4 +19,6 @@ def run_gate(record):
     total_high = sum(i["high"] for i in record.line_items)
     record.status = "awaiting_signoff"
     return ("awaiting_signoff", {"total_low": total_low, "total_high": total_high,
-                                 "line_items": record.line_items})
+                                 "line_items": record.line_items,
+                                 "requires_inspection": bool(record.flags),
+                                 "flags": list(record.flags)})

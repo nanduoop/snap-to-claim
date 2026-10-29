@@ -12,13 +12,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from agent import STATE_DIR, resume_run, run_agent
+from video import extract_frames
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.path.join(APP_DIR, "static", "index.html")
 
 app = FastAPI(title="Snap-to-Claim")
+app.mount("/static", StaticFiles(directory=os.path.join(APP_DIR, "static")), name="static")
 _runs = {}
 _ID = re.compile(r"^[\w-]{1,64}$")
 _EXTS = {".jpg": ".jpg", ".jpeg": ".jpg", ".png": ".png", ".webp": ".webp"}
@@ -87,8 +90,17 @@ def index():
 @app.post("/claims")
 def start_claim(file: UploadFile = File(...)):
     claim_id = "c" + uuid.uuid4().hex[:8]
-    photo = _save_upload(claim_id, file, 0)
-    _background(claim_id, lambda: run_agent(claim_id, photo))
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext in (".mp4", ".mov"):
+        path = os.path.join(_claim_dir(claim_id), f"video_0{ext}")
+        os.makedirs(_claim_dir(claim_id), exist_ok=True)
+        with open(path, "wb") as out:
+            out.write(file.file.read())
+        frames = extract_frames(path, os.path.join(_claim_dir(claim_id), "frames"))
+        _background(claim_id, lambda: run_agent(claim_id, frames=frames))
+    else:
+        photo = _save_upload(claim_id, file, 0)
+        _background(claim_id, lambda: run_agent(claim_id, photo))
     return {"claim_id": claim_id}
 
 
@@ -106,6 +118,14 @@ def get_photo(claim_id: str, n: int):
     if n < 0 or n >= len(photos) or not os.path.exists(photos[n]):
         raise HTTPException(404, "no such photo")
     return FileResponse(photos[n])
+
+
+@app.get("/claims/{claim_id}/frame/{n}")
+def get_frame(claim_id: str, n: int):
+    frames = _read_state(_check_id(claim_id))["record"].get("frames") or []
+    if n < 0 or n >= len(frames) or not os.path.exists(frames[n]):
+        raise HTTPException(404, "no such frame")
+    return FileResponse(frames[n])
 
 
 @app.get("/claims/{claim_id}/crop/{part_id}")
@@ -146,8 +166,10 @@ def approve(claim_id: str):
     state = _read_state(claim_id)
     if state["status"] not in ("awaiting_signoff", "escalated"):
         raise HTTPException(400, f"claim is {state['status']}")
+    from datetime import datetime, timezone
     state["status"] = "approved"
     state["record"]["status"] = "approved"
+    state["record"]["approved_at"] = datetime.now(timezone.utc).isoformat()
     _write_state(claim_id, state)
     return {"status": "approved"}
 

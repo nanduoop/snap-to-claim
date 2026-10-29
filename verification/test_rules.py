@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(ROOT, "app"))
 sys.path.insert(0, ROOT)
 
 from claim_record import ClaimRecord
-from tools import DISPATCH, TOOLS, record_missing_part, withdraw_finding
+from tools import DISPATCH, TOOLS, dismiss_part, flag_hidden_damage, record_missing_part, withdraw_finding
 from verification.rules import check_rules
 
 
@@ -17,8 +17,9 @@ def _record():
 
 
 def main():
-    assert len(TOOLS) == len(DISPATCH) == 10
-    assert "withdraw_finding" in DISPATCH
+    assert len(TOOLS) == len(DISPATCH) == 13
+    assert "withdraw_finding" in DISPATCH and "flag_hidden_damage" in DISPATCH
+    assert "select_frames" in DISPATCH and "mark_possible_damage" in DISPATCH
 
     # same instance, two damages -> CONFLICT naming both findings
     r = _record()
@@ -69,6 +70,21 @@ def main():
     for p in probs:
         assert isinstance(p["finding_ids"], list), p
     print("finding_ids on all problems OK")
+
+    # hidden risk must be flagged or dismissed
+    r = _record()
+    r.survey = {"damaged": [], "missing": [], "hidden_risk": ["airbags", "frame"], "notes": "x"}
+    probs = check_rules(r)
+    assert [p["code"] for p in probs] == ["HIDDEN_RISK_GAP", "HIDDEN_RISK_GAP"], probs
+    assert all(p["finding_ids"] == [] for p in probs)
+    g = flag_hidden_damage(r, "airbags", "deployed")
+    assert g["flagged"] == {"area": "airbags", "reason": "deployed", "photo": "test_images/car_11.jpg"}, g
+    assert "error" in flag_hidden_damage(r, "turbo", "x")
+    assert dismiss_part(r, "frame", "looks straight")["dismissed"] == {"part": "frame", "reason": "looks straight"}
+    assert check_rules(r) == [], check_rules(r)
+    d = ClaimRecord.from_dict(r.to_dict())
+    assert d.flags == r.flags
+    print("hidden risk flag/dismiss OK")
 
 
 if __name__ == "__main__":

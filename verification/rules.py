@@ -54,4 +54,11 @@ def check_rules(record):
             problems.append({"code": "COVERAGE_GAP", "finding_ids": [],
                              "detail": f"surveyed part '{s}' has no finding or dismissal"})
 
+    risks = {str(a).strip().lower() for a in survey.get("hidden_risk") or []}
+    flagged = {str(f.get("area")).strip().lower() for f in record.flags}
+    for s in sorted(risks):
+        if s not in flagged and s not in dismissed:
+            problems.append({"code": "HIDDEN_RISK_GAP", "finding_ids": [],
+                             "detail": f"surveyed hidden-risk area '{s}' is neither flagged nor dismissed"})
+
     return problems

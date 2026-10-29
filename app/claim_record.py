@@ -22,6 +22,10 @@ class ClaimRecord:
         self.survey = None
         self.dismissals = []
         self.withdrawals = []
+        self.flags = []
+        self.frames = []
+        self.sides = {}
+        self.possible = []
         self.refusals = 0
         self._n_part = 0
         self._n_finding = 0
@@ -73,6 +77,19 @@ class ClaimRecord:
         self.withdrawals.append(entry)
         return entry
 
+    def add_flag(self, area, reason, photo=None):
+        entry = {"area": area, "reason": reason,
+                 "photo": photo or (self.photos[-1] if self.photos else None)}
+        self.flags.append(entry)
+        return entry
+
+    def add_possible(self, part_id, reason):
+        if not any(p["id"] == part_id for p in self.parts):
+            raise ValueError(f"unknown part_id: {part_id}")
+        entry = {"part_id": part_id, "reason": reason}
+        self.possible.append(entry)
+        return entry
+
     def add_line_item(self, finding_id, low=None, high=None):
         finding = next((x for x in self.findings if x["id"] == finding_id), None)
         if finding is None:
@@ -115,6 +132,10 @@ class ClaimRecord:
             "survey": self.survey,
             "dismissals": self.dismissals,
             "withdrawals": self.withdrawals,
+            "flags": self.flags,
+            "frames": self.frames,
+            "sides": self.sides,
+            "possible": self.possible,
             "refusals": self.refusals,
         }
 
@@ -140,6 +161,10 @@ class ClaimRecord:
         r.survey = d.get("survey")
         r.dismissals = d.get("dismissals", [])
         r.withdrawals = d.get("withdrawals", [])
+        r.flags = d.get("flags", [])
+        r.frames = d.get("frames", [])
+        r.sides = d.get("sides", {})
+        r.possible = d.get("possible", [])
         r.refusals = d.get("refusals", 0)
         r._n_part = len(r.parts)
         r._n_finding = len(r.findings)

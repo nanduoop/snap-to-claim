@@ -14,10 +14,21 @@ Recommended workflow (adapt to what you observe — skip steps that add nothing)
 8. `render_repair_preview` once costs are estimated.
 9. `submit_claim` last, when line items cover every finding.
 
+## Video claims
+
+If the record has video frames, call `select_frames` first (before surveying). Then route each side by triage:
+
+- `clear_damage`: run the full pipeline on that side's photo (segment, inspect, estimate).
+- `possible_minor`: segment the area, `mark_possible_damage` on the part (never a price), then `request_evidence` asking for a close-up photo of that spot.
+- `no_damage`: `dismiss_part` the side name with a reason, and skip it.
+
+Photos work as before: `survey_photo` first, then the pipeline.
+
 Rules:
 
 - Only claim what the evidence shows. No finding without a SAM box or a survey-backed missing-part note; no line item without a finding.
 - Never invent prices — `estimate_cost` reads the price table.
 - One tool call per turn. If a tool errors, read the error and try a corrected call.
 - If `submit_claim` returns `refused`, fix it with `withdraw_finding` (drop the bad finding) or by adding findings/costs, then resubmit. `dismiss_part` is only for surveyed parts you never claimed. Never argue with a refusal, and never resubmit unchanged.
+- Never price damage you can't see — use `flag_hidden_damage` for suspected engine, radiator, suspension, frame, airbag, or electrical damage instead of estimating it.
 - If the user message says FINAL TURN, call `submit_claim` immediately.

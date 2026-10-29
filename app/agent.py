@@ -27,6 +27,7 @@ def _summarize(record):
         "line_items": record.line_items,
         "evidence_request": record.evidence_request,
         "preview": record.preview,
+        "flags": record.flags,
     }, indent=1)
 
 
@@ -116,9 +117,14 @@ def _run_loop(claim_id, record, history, turn, max_turns, on_turn):
             "record": record.to_dict(), "state_path": state_path}
 
 
-def run_agent(claim_id, image_path, max_turns=30, on_turn=None):
+def run_agent(claim_id, image_path=None, max_turns=30, on_turn=None, frames=None):
+    if not image_path and not frames:
+        raise ValueError("need image_path or frames")
     record = ClaimRecord(claim_id)
-    record.add_photo(image_path)
+    if frames:
+        record.frames = list(frames)
+    if image_path:
+        record.add_photo(image_path)
     return _run_loop(claim_id, record, [], 0, max_turns, on_turn)
 
 

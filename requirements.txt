@@ -5,3 +5,4 @@ fastapi
 uvicorn
 pillow
 python-multipart
+opencv-python-headless

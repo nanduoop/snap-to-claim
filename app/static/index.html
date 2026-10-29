@@ -3,12 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <title>Snap-to-Claim</title>
 <style>
 * { box-sizing: border-box; }
 body { margin: 0; font: 14px/1.45 -apple-system, system-ui, sans-serif; background: #f6f8fa; color: #1f2328; }
 header { display: flex; gap: 10px; align-items: center; padding: 8px 16px; background: #fff; border-bottom: 1px solid #d0d7de; flex-wrap: wrap; }
-header h1 { font-size: 16px; margin: 0 8px 0 0; }
+header h1 { font-size: 16px; margin: 0; }
+.tagline { color: #57606a; font-size: 13px; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 12px; background: #ddf4ff; color: #0969da; font-size: 11.5px; font-weight: 600; }
 header .spacer { flex: 1; }
 main { display: grid; grid-template-columns: minmax(360px, 5fr) minmax(340px, 4fr) minmax(300px, 3fr); gap: 12px; padding: 12px; max-width: 1560px; margin: 0 auto; align-items: start; }
 section { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 10px 12px; }
@@ -17,14 +20,15 @@ canvas { width: 100%; border-radius: 6px; background: #eee; cursor: pointer; dis
 #feed { display: flex; flex-direction: column; gap: 8px; max-height: 78vh; overflow: auto; }
 .card { border: 1px solid #d0d7de; border-radius: 6px; padding: 6px 8px; font-size: 12.5px; }
 .card .t { font-weight: 600; color: #57606a; }
+.card summary { cursor: pointer; color: #0969da; font-size: 12px; }
 .card pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 11.5px; background: #f6f8fa; padding: 4px 6px; border-radius: 4px; max-height: 160px; overflow: auto; }
 .card.refused { border-color: #cf222e; background: #ffebe9; }
 .card .prob { color: #cf222e; }
 .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-weight: 600; font-size: 12.5px; }
 table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #eee; }
-.ba { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.ba img { width: 100%; border-radius: 6px; border: 1px solid #d0d7de; }
+.ba { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ba img { width: 100%; max-height: 340px; object-fit: contain; background: #f6f8fa; border-radius: 6px; border: 1px solid #d0d7de; }
 .ba p { margin: 2px 0 6px; font-size: 11.5px; color: #57606a; }
 button { padding: 4px 12px; border-radius: 6px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; }
 button.primary { background: #1a7f37; color: #fff; border-color: #1a7f37; }
@@ -32,15 +36,27 @@ button.danger { background: #cf222e; color: #fff; border-color: #cf222e; }
 textarea { width: 100%; min-height: 56px; border-radius: 6px; border: 1px solid #d0d7de; padding: 6px; font: inherit; margin: 6px 0; }
 #missing { margin: 0 0 8px; padding-left: 20px; }
 #missing li { font-size: 12.5px; }
-#partDetail img { width: 100%; border-radius: 6px; border: 1px solid #d0d7de; }
+.cropcard { display: flex; gap: 10px; align-items: flex-start; }
+.cropcard img { max-height: 220px; max-width: 45%; width: auto; border-radius: 6px; border: 1px solid #d0d7de; }
+.cropcard p { margin: 0; font-size: 12.5px; }
 .muted { color: #57606a; font-size: 12px; }
+.ok { color: #1a7f37; font-weight: 600; }
+.bad { color: #cf222e; font-weight: 600; }
+#verifyCard p { margin: 3px 0; font-size: 12.5px; }
+#verifyCard .prob { color: #cf222e; font-size: 12px; }
+.inspect-box { background: #fff8c5; border: 1px solid #d4a017; border-radius: 6px; padding: 6px 8px; font-size: 12.5px; margin-top: 6px; }
+#frames { display: flex; gap: 6px; overflow-x: auto; margin-top: 8px; }
+.frame { text-align: center; font-size: 11px; color: #57606a; flex: 0 0 auto; }
+.frame img { height: 64px; border-radius: 4px; border: 2px solid transparent; display: block; background: #eee; }
+.frame.sel img { border-color: #0969da; }
 input[type=text] { padding: 4px 8px; border-radius: 6px; border: 1px solid #d0d7de; }
 </style>
 </head>
 <body>
 <header>
 <h1>Snap-to-Claim</h1>
-<span id="claimLabel" class="muted">no claim</span>
+<span class="tagline">Photo → verified insurance claim, by an AI agent</span>
+<span class="pill">Muse Spark</span><span class="pill">SAM 3.1</span><span class="pill">Muse Image</span>
 <span class="spacer"></span>
 <input type="file" id="newFile" accept="image/*">
 <button id="startBtn">Start new claim</button>
@@ -52,6 +68,7 @@ input[type=text] { padding: 4px 8px; border-radius: 6px; border: 1px solid #d0d7
 <h2>Evidence</h2>
 <canvas id="photo"></canvas>
 <p id="photoNote" class="muted"></p>
+<div id="frames"></div>
 <h2>Missing parts</h2>
 <ul id="missing"></ul>
 <div id="partDetail"></div>
@@ -64,10 +81,14 @@ input[type=text] { padding: 4px 8px; border-radius: 6px; border: 1px solid #d0d7
 <section>
 <h2>Claim</h2>
 <p>Status: <span id="badge" class="badge">—</span></p>
+<p id="approvedAt" class="muted"></p>
 <table><thead><tr><th>Part</th><th>Damage</th><th>Sev</th><th>USD</th></tr></thead><tbody id="items"></tbody></table>
 <p id="totals"></p>
-<h2>Before / After</h2>
-<div class="ba"><div><img id="beforeImg" alt="before"><p>before</p></div><div><img id="afterImg" alt="after"><p>after</p></div></div>
+<div id="flagsBox"></div>
+<div id="verifyCard">
+<h2>Verification</h2>
+<div id="verifyBody"><p class="muted">no attempts yet</p></div>
+</div>
 <div id="adjuster" style="display:none">
 <h2>Adjuster sign-off</h2>
 <button id="approveBtn" class="primary">Approve</button>
@@ -80,12 +101,24 @@ input[type=text] { padding: 4px 8px; border-radius: 6px; border: 1px solid #d0d7
 <input type="file" id="moreFile" accept="image/*">
 <button id="moreBtn">Upload &amp; resume</button>
 </div>
+<div id="reportBox" style="display:none">
+<h2>Report</h2>
+<button id="reportBtn">Download claim report</button>
+</div>
+</section>
+<section id="baSection" style="grid-column:1/-1;display:none">
+<h2>Before / After</h2>
+<div class="ba">
+<div id="beforeWrap"><img id="beforeImg" alt="before"><p>before — damage photo</p></div>
+<div id="afterWrap"><img id="afterImg" alt="after"><p>after — AI repair preview</p></div>
+</div>
 </section>
 </main>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const COLORS = {running:['#ddf4ff','#0969da'],needs_input:['#fff8c5','#9a6700'],awaiting_signoff:['#fbefff','#8250df'],escalated:['#ffebe9','#cf222e'],approved:['#dafbe1','#1a7f37'],max_turns:['#eaeef2','#57606a']};
+const COLORS = {running:['#ddf4ff','#0969da'],needs_input:['#fff8c5','#9a6700'],awaiting_signoff:['#ddf7f5','#1b7f8e'],escalated:['#ffebe9','#cf222e'],approved:['#dafbe1','#1a7f37'],max_turns:['#eaeef2','#57606a']};
+const RULE_CODES = new Set(['ORPHAN_ITEM', 'PRICE_MISMATCH', 'CONFLICT', 'COVERAGE_GAP', 'PRICE_TABLE_UNREADABLE']);
 
 let claimId = new URLSearchParams(location.search).get('claim') || '';
 let shownSrc = '', lastBoxes = [];
@@ -117,31 +150,98 @@ async function loadClaim() {
   }
 }
 
+function actName(act) {
+  const i = (act || '').indexOf('(');
+  return i < 0 ? (act || '') : act.slice(0, i);
+}
+
+function summarize(h, rec) {
+  try {
+    const o = h.observe || {};
+    const name = actName(h.act);
+    const parts = rec.parts || [];
+    const label = pid => {
+      const p = parts.find(x => x.id === pid);
+      return p ? p.concept + (p.position ? ' ' + p.position : '') : (pid || 'part');
+    };
+    switch (name) {
+      case 'survey_photo':
+        if (o.error) return 'Survey failed';
+        return `Surveyed photo: ${(o.damaged || []).length} damaged, ${(o.missing || []).length} missing`;
+      case 'segment_parts':
+        if (o.error) return 'Segment failed';
+        return `Found ${o.parts_added ?? 0} parts`;
+      case 'inspect_part':
+        if (o.error) return `Inspect ${o.part_id || ''} failed`;
+        if (!o.damaged) return `${label(o.part_id)} → intact`;
+        return `${label(o.part_id)} → ${o.damage}, ${o.severity}`;
+      case 'record_missing_part':
+        if (o.error) return 'Record missing failed';
+        return `Recorded missing ${o.part}${o.severity ? ' (' + o.severity + ')' : ''}`;
+      case 'estimate_cost':
+        if (o.error) return 'Estimate failed';
+        return `Priced ${o.line_item.part}: $${o.line_item.low}–$${o.line_item.high}`;
+      case 'dismiss_part':
+        if (o.error) return 'Dismiss failed';
+        return `Dismissed ${o.dismissed ? o.dismissed.part : ''}`;
+      case 'withdraw_finding':
+        if (o.error) return 'Withdraw failed';
+        return `Withdrew ${o.withdrawn}`;
+      case 'flag_hidden_damage':
+        if (o.error) return 'Flag failed';
+        return `Flagged ${o.flagged ? o.flagged.area : ''} for inspection`;
+      case 'select_frames':
+        if (o.error) return 'Select frames failed';
+        return 'Selected sides: ' + Object.entries(o.sides || {}).map(([s, i]) => `${s} ${i.triage}`).join(', ');
+      case 'mark_possible_damage':
+        if (o.error) return 'Mark possible failed';
+        return `Marked ${o.marked ? o.marked.part_id : ''} as possible damage`;
+      case 'request_evidence':
+        return 'Asked for more evidence';
+      case 'render_repair_preview':
+        if (o.error) return 'Preview failed';
+        return 'Rendered repair preview';
+      case 'submit_claim':
+        if (o.status === 'refused') return `Claim REFUSED: ${(o.problems || []).length} problems (attempt ${o.refusals})`;
+        if (o.status === 'escalated') return 'Escalated to human adjuster';
+        if (o.status === 'awaiting_signoff') return `Submitted for sign-off: $${o.total_low}–$${o.total_high}`;
+        return 'Submit: ' + (o.status || 'done');
+      case 'adjuster_reject':
+        return 'Adjuster rejected: ' + String(o.notes || '').slice(0, 80);
+      case 'none':
+        return 'No tool called';
+      default:
+        return h.act || '…';
+    }
+  } catch (e) { return h.act || '…'; }
+}
+
 function render(d) {
   const rec = d.record;
   const [bg, fg] = COLORS[d.status] || COLORS.max_turns;
   const badge = $('badge');
   badge.textContent = d.status + (d.running ? ' · running' : '');
   badge.style.background = bg; badge.style.color = fg;
+  $('approvedAt').textContent = rec.approved_at ? 'Approved at ' + new Date(rec.approved_at).toLocaleString() : '';
   $('runState').textContent = d.error ? 'error: ' + d.error : (d.running ? `agent running… turn ${d.turn}` : `${d.turn} turns`);
   renderPhoto(rec, d.history);
-  renderFeed(d.history);
+  renderFeed(d.history, rec, d.running);
   renderItems(rec);
+  renderVerify(d);
   const b = $('beforeImg');
   const bu = rec.photos.length ? `/claims/${claimId}/photo/0` : '';
-  if (b.dataset.u !== bu) { b.dataset.u = bu; b.src = bu; }
+  if (b.dataset.u !== bu) { b.dataset.u = bu; if (bu) b.src = bu; }
+  $('beforeWrap').style.display = bu ? '' : 'none';
   const a = $('afterImg');
-  if (rec.preview) {
-    const au = `/claims/${claimId}/preview`;
-    if (a.dataset.u !== au) { a.dataset.u = au; a.src = au; }
-    a.style.display = '';
-  } else {
-    a.style.display = 'none';
-  }
+  const au = rec.preview ? `/claims/${claimId}/preview` : '';
+  if (a.dataset.u !== au) { a.dataset.u = au; if (au) a.src = au; }
+  $('afterWrap').style.display = au ? '' : 'none';
+  $('baSection').style.display = (bu || au) ? '' : 'none';
   $('adjuster').style.display = ((d.status === 'awaiting_signoff' || d.status === 'escalated') && !d.running) ? '' : 'none';
   const needy = d.status === 'needs_input' && !d.running;
   $('needsInput').style.display = needy ? '' : 'none';
   if (needy) $('needReason').textContent = rec.evidence_request || '';
+  $('reportBox').style.display = d.status === 'approved' ? '' : 'none';
 }
 
 function renderPhoto(rec, hist) {
@@ -165,6 +265,14 @@ function renderPhoto(rec, hist) {
     const f = (rec.findings || []).find(x => x.part_id === p.id);
     return `<li><b>${esc(p.concept)}${p.position ? ' ' + esc(p.position) : ''}</b> — ${esc(f ? f.rationale : 'recorded missing')}</li>`;
   }).join('') : '<li class="muted">none</li>';
+  const sideOf = {};
+  for (const [side, info] of Object.entries(rec.sides || {})) if (info.photo) sideOf[info.photo] = side;
+  const fr = rec.frames || [];
+  $('frames').innerHTML = fr.map((p, i) => {
+    const s = sideOf[p];
+    return `<div class="frame${s ? ' sel' : ''}"><img src="/claims/${claimId}/frame/${i}" alt="frame ${i}" loading="lazy"><span>${esc(s || '#' + i)}</span></div>`;
+  }).join('');
+  $('frames').style.display = fr.length ? '' : 'none';
 }
 
 function drawPhoto() {
@@ -174,13 +282,25 @@ function drawPhoto() {
   const x = c.getContext('2d');
   x.drawImage(img, 0, 0);
   lastBoxes = [];
+  const possSet = new Set((rec.possible || []).map(m => m.part_id));
   for (const p of view.parts) {
     const b = p.box, sx = c.width / (b.w || c.width), sy = c.height / (b.h || c.height);
     const r = {x1: b.x1 * sx, y1: b.y1 * sy, x2: b.x2 * sx, y2: b.y2 * sy, part: p};
-    x.strokeStyle = view.color[p.id] || '#8b8d98'; x.lineWidth = 3;
+    const f = (rec.findings || []).find(v => v.part_id === p.id);
+    const poss = !f && possSet.has(p.id);
+    const col = poss ? '#d4a017' : (view.color[p.id] || '#8b8d98');
+    x.strokeStyle = col; x.lineWidth = 5;
+    x.setLineDash(poss ? [7, 5] : []);
     x.strokeRect(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1);
-    x.fillStyle = x.strokeStyle; x.font = '14px sans-serif';
-    x.fillText(p.concept + (p.position ? ' ' + p.position : ''), r.x1 + 4, r.y1 + 16);
+    x.setLineDash([]);
+    const tag = p.concept + (f ? ' · ' + f.damage : (poss ? ' · possible' : (col === '#46a758' ? ' · intact' : '')));
+    x.font = '13px sans-serif';
+    const w = x.measureText(tag).width + 12;
+    const cy = Math.max(0, r.y1 - 22);
+    x.fillStyle = col;
+    x.fillRect(r.x1, cy, w, 20);
+    x.fillStyle = '#fff';
+    x.fillText(tag, r.x1 + 6, cy + 14);
     lastBoxes.push(r);
   }
   $('photoNote').textContent = `${view.parts.length} boxes · photo ${rec.photos.length} of ${rec.photos.length} · click a box`;
@@ -192,22 +312,24 @@ function showDetail(p) {
   const rec = view.rec;
   const f = (rec.findings || []).find(x => x.part_id === p.id);
   const o = view.insp[p.id] || {};
-  const dmg = f ? `${esc(f.damage)}, ${esc(f.severity)}` : 'intact / unknown';
-  const why = f ? f.rationale : (o.rationale || 'not inspected yet');
+  const m = !f && (rec.possible || []).find(x => x.part_id === p.id);
+  const dmg = f ? `${esc(f.damage)}, ${esc(f.severity)}` : (m ? 'Possible damage (no price)' : 'intact / unknown');
+  const why = f ? f.rationale : (m ? m.reason : (o.rationale || 'not inspected yet'));
   el.innerHTML = `<h2>${esc(p.concept)}${p.position ? ' ' + esc(p.position) : ''} (${esc(p.id)})</h2>` +
-    `<img src="/claims/${claimId}/crop/${p.id}" alt="crop" onerror="this.remove()">` +
-    `<p><b>${dmg}</b> — ${esc(why)}</p>`;
+    `<div class="cropcard"><img src="/claims/${claimId}/crop/${p.id}" alt="crop" onerror="this.remove()">` +
+    `<p><b>${dmg}</b> — ${esc(why)}</p></div>`;
 }
 
-function renderFeed(hist) {
+function renderFeed(hist, rec, running) {
   const feed = $('feed');
-  const stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 120;
+  const stick = running || (feed.scrollHeight - feed.scrollTop - feed.clientHeight < 120);
   feed.innerHTML = hist.map(h => {
     const o = h.observe;
     const refused = o && o.status === 'refused';
-    let obs = `<pre>${esc(typeof o === 'string' ? o : JSON.stringify(o, null, 1))}</pre>`;
-    if (refused) obs = (o.problems || []).map(p => `<div class="prob"><b>${esc(p.code)}</b> ${esc(p.detail)}</div>`).join('') + obs;
-    return `<div class="card${refused ? ' refused' : ''}"><span class="t">Turn ${h.turn}</span><br>PLAN: ${esc(h.plan)}<br>ACT: <code>${esc(h.act)}</code>${obs}</div>`;
+    let extra = '';
+    if (refused) extra = (o.problems || []).map(p => `<div class="prob"><b>${esc(p.code)}</b> ${esc(p.detail)}</div>`).join('');
+    const raw = `<pre>${esc(typeof o === 'string' ? o : JSON.stringify(o, null, 1))}</pre>`;
+    return `<div class="card${refused ? ' refused' : ''}"><span class="t">Turn ${h.turn}</span> <b>${esc(summarize(h, rec))}</b>${extra}<br><span class="muted">PLAN: ${esc(h.plan)}</span><details><summary>details</summary>ACT: <code>${esc(h.act)}</code>${raw}</details></div>`;
   }).join('') || '<p class="muted">no turns yet</p>';
   if (stick) feed.scrollTop = feed.scrollHeight;
 }
@@ -216,7 +338,40 @@ function renderItems(rec) {
   const items = rec.line_items || [];
   $('items').innerHTML = items.map(i => `<tr><td>${esc(i.part)}</td><td>${esc(i.damage)}</td><td>${esc(i.severity)}</td><td>$${i.low}–$${i.high}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">none yet</td></tr>';
   const lo = items.reduce((a, i) => a + i.low, 0), hi = items.reduce((a, i) => a + i.high, 0);
-  $('totals').innerHTML = items.length ? `<b>Total: $${lo}–$${hi}</b>` : '';
+  const flags = rec.flags || [];
+  $('totals').innerHTML = items.length ? (flags.length ? `<b>Visible damage: $${lo}–$${hi} (+ inspection pending)</b>` : `<b>Total: $${lo}–$${hi}</b>`) : '';
+  $('flagsBox').innerHTML = flags.length ? `<div class="inspect-box"><b>Needs in-person inspection</b>` + flags.map(f => `<br>• <b>${esc(f.area)}</b> — ${esc(f.reason)}`).join('') + `</div>` : '';
+}
+
+function renderVerify(d) {
+  const rec = d.record;
+  const submits = (d.history || []).filter(h => actName(h.act) === 'submit_claim' && h.observe && h.observe.status);
+  const el = $('verifyBody');
+  if (!submits.length) { el.innerHTML = '<p class="muted">no attempts yet</p>'; return; }
+  const last = submits[submits.length - 1].observe;
+  let rules = '…', judge = '…';
+  if (last.status === 'awaiting_signoff' || d.status === 'approved') { rules = '✓'; judge = '✓'; }
+  else {
+    const codes = (last.problems || []).map(p => p.code);
+    if (codes.some(c => RULE_CODES.has(c))) { rules = '✗'; judge = '—'; }
+    else { rules = '✓'; judge = '✗'; }
+  }
+  const badIds = new Set();
+  for (const h of submits) for (const p of (h.observe.problems || [])) {
+    if (p.code === 'UNSUPPORTED') (p.finding_ids || []).forEach(id => badIds.add(id));
+  }
+  const passed = d.status === 'awaiting_signoff' || d.status === 'approved';
+  const perFinding = (rec.findings || []).map(f => {
+    const mark = badIds.has(f.id) ? '✗' : (passed ? '✓' : '…');
+    const cls = mark === '✓' ? 'ok' : (mark === '✗' ? 'bad' : 'muted');
+    return `<p class="${cls}">${mark} ${esc(f.id)}: ${esc(f.damage)}, ${esc(f.severity)}</p>`;
+  }).join('');
+  const past = submits.filter(h => h.observe.status !== 'awaiting_signoff').map(h =>
+    `<p><b>Turn ${h.turn} ${esc(h.observe.status)}</b>` +
+    (h.observe.problems || []).map(p => `<br><span class="prob"><b>${esc(p.code)}</b> ${esc(p.detail)}</span>`).join('') + '</p>'
+  ).join('');
+  const rc = v => v === '✓' ? 'ok' : (v === '✗' ? 'bad' : 'muted');
+  el.innerHTML = `<p>Rules <span class="${rc(rules)}">${rules}</span> · Judge <span class="${rc(judge)}">${judge}</span> · Refusals: ${rec.refusals || 0}</p>` + perFinding + past;
 }
 
 $('photo').addEventListener('click', e => {
@@ -249,6 +404,7 @@ $('moreBtn').onclick = async () => {
   await api(`/claims/${claimId}/photo`, {method: 'POST', body: fd});
   loadClaim();
 };
+$('reportBtn').onclick = () => window.open(`/static/report.html?claim=${encodeURIComponent(claimId)}`, '_blank');
 
 if (claimId) { $('claimLabel').textContent = 'claim ' + claimId; loadClaim(); }
 setInterval(loadClaim, 1500);

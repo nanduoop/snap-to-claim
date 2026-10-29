@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Claim report</title>
+<style>
+body { margin: 0 auto; max-width: 760px; padding: 24px; font: 14px/1.5 -apple-system, system-ui, sans-serif; color: #1f2328; }
+h1 { font-size: 22px; margin-bottom: 0; }
+.sub { color: #57606a; margin-top: 2px; }
+img.photo { width: 100%; border-radius: 8px; border: 1px solid #d0d7de; }
+table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #eee; }
+.total { font-size: 16px; }
+.prob { color: #cf222e; }
+.ok { color: #1a7f37; }
+button { padding: 6px 16px; border-radius: 6px; border: 1px solid #d0d7de; background: #1a7f37; color: #fff; cursor: pointer; }
+@media print { button { display: none; } }
+</style>
+</head>
+<body>
+<h1>Vehicle damage claim report</h1>
+<p class="sub" id="meta">loading…</p>
+<button onclick="window.print()">Print / Save PDF</button>
+<h2>Damage photo</h2>
+<img class="photo" id="photo" alt="damage photo">
+<h2>Line items</h2>
+<table><thead><tr><th>Part</th><th>Damage</th><th>Severity</th><th>USD</th></tr></thead><tbody id="items"></tbody></table>
+<p class="total" id="total"></p>
+<h2>Verification</h2>
+<div id="verify"></div>
+<h2>Adjuster sign-off</h2>
+<p id="signoff"></p>
+<script>
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const claimId = new URLSearchParams(location.search).get('claim') || '';
+
+async function main() {
+  if (!claimId) { document.getElementById('meta').textContent = 'no claim id'; return; }
+  const d = await (await fetch('/claims/' + encodeURIComponent(claimId))).json();
+  const rec = d.record;
+  document.getElementById('meta').textContent = `claim ${claimId} · status ${d.status} · ${d.turn} turns · generated ${new Date().toLocaleString()}`;
+  document.getElementById('photo').src = rec.photos.length ? `/claims/${claimId}/photo/0` : '';
+  const items = rec.line_items || [];
+  document.getElementById('items').innerHTML = items.map(i => `<tr><td>${esc(i.part)}</td><td>${esc(i.damage)}</td><td>${esc(i.severity)}</td><td>$${i.low}–$${i.high}</td></tr>`).join('');
+  document.getElementById('total').innerHTML = `<b>Total: $${items.reduce((a, i) => a + i.low, 0)}–$${items.reduce((a, i) => a + i.high, 0)}</b>`;
+  const submits = (d.history || []).filter(h => h.act && h.act.startsWith('submit_claim(') && h.observe && h.observe.status);
+  const rows = submits.map(h => {
+    const o = h.observe;
+    if (o.status === 'awaiting_signoff') return `<p class="ok">Turn ${h.turn}: passed — rules ✓, judge ✓.</p>`;
+    return `<p>Turn ${h.turn}: ${esc(o.status)} (${(o.problems || []).length} problems)` +
+      (o.problems || []).map(p => `<br><span class="prob"><b>${esc(p.code)}</b> ${esc(p.detail)}</span>`).join('') + '</p>';
+  }).join('') || '<p>No verification attempts yet.</p>';
+  document.getElementById('verify').innerHTML = `<p>Refusals: ${rec.refusals || 0}</p>` + rows;
+  document.getElementById('signoff').textContent = rec.approved_at ? `Approved at ${new Date(rec.approved_at).toLocaleString()}.` : 'Not yet approved.';
+}
+
+main();
+</script>
+</body>
+</html>

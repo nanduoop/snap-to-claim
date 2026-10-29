@@ -8,6 +8,8 @@ from boxes import box_pixels
 from claim_record import load_prices
 from meta_client import chat, edit_image, segment
 
+HIDDEN_AREAS = ["engine", "radiator", "suspension", "frame", "airbags", "electrical"]
+
 TOOLS = [
     {"type": "function", "function": {"name": "segment_parts", "description": "Find car parts in the photo.", "parameters": {"type": "object", "properties": {"concepts": {"type": "array", "items": {"type": "string"}}}, "required": ["concepts"]}}},
     {"type": "function", "function": {"name": "inspect_part", "description": "Crop a part and judge damage.", "parameters": {"type": "object", "properties": {"part_id": {"type": "string"}}, "required": ["part_id"]}}},
@@ -17,8 +19,11 @@ TOOLS = [
     {"type": "function", "function": {"name": "submit_claim", "description": "Submit the claim for verification.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "survey_photo", "description": "Survey the full photo for damaged and missing parts.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "record_missing_part", "description": "Record a part that is missing entirely (no box).", "parameters": {"type": "object", "properties": {"part": {"type": "string"}, "rationale": {"type": "string"}, "severity": {"type": "string"}, "position": {"type": "string"}}, "required": ["part", "rationale"]}}},
-    {"type": "function", "function": {"name": "dismiss_part", "description": "Explicitly decline to claim a surveyed part, with reason.", "parameters": {"type": "object", "properties": {"part": {"type": "string"}, "reason": {"type": "string"}}, "required": ["part", "reason"]}}},
+    {"type": "function", "function": {"name": "dismiss_part", "description": "Explicitly decline to claim a surveyed part or hidden-risk area, with reason.", "parameters": {"type": "object", "properties": {"part": {"type": "string"}, "reason": {"type": "string"}}, "required": ["part", "reason"]}}},
     {"type": "function", "function": {"name": "withdraw_finding", "description": "Drop a bad finding and its line items, with reason.", "parameters": {"type": "object", "properties": {"finding_id": {"type": "string"}, "reason": {"type": "string"}}, "required": ["finding_id", "reason"]}}},
+    {"type": "function", "function": {"name": "flag_hidden_damage", "description": "Flag suspected hidden damage for in-person inspection (no price).", "parameters": {"type": "object", "properties": {"area": {"type": "string"}, "reason": {"type": "string"}}, "required": ["area", "reason"]}}},
+    {"type": "function", "function": {"name": "select_frames", "description": "Pick the best video frame per car side and triage each side.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "mark_possible_damage", "description": "Mark a part as possible damage (no price).", "parameters": {"type": "object", "properties": {"part_id": {"type": "string"}, "reason": {"type": "string"}}, "required": ["part_id", "reason"]}}},
 ]
 
 
@@ -27,9 +32,10 @@ def segment_parts(record, concepts, photo_path=None):
     if not photo:
         return {"error": "no photo"}
     added = []
+    side = _side_of(record, photo)
     for concept in concepts:
         for box in segment(photo, prompt=concept):
-            pid = record.add_part(concept, box, photo=photo)
+            pid = record.add_part(concept, box, photo=photo, position=side)
             added.append({"id": pid, "concept": concept, "box": box})
     return {"parts_added": len(added), "parts": added}
 
@@ -111,7 +117,9 @@ def survey_photo(record):
         "You are a vehicle damage inspector. Look at this full photo of a car. "
         "List which parts look DAMAGED and which parts appear MISSING entirely (e.g. torn-off bumper). "
         "Part names must be from: hood, bumper, fender, door, windshield, headlight, tire, mirror. "
-        'Return ONLY JSON: {"damaged": ["part", ...], "missing": ["part", ...], "notes": "one sentence"}.'
+        "Also list hidden_risk areas (engine, radiator, suspension, frame, airbags, electrical) "
+        "when you see signs of concealed damage (exposed engine bay, deployed airbags, bent wheel alignment, fluid leaks). "
+        'Return ONLY JSON: {"damaged": ["part", ...], "missing": ["part", ...], "hidden_risk": ["area", ...], "notes": "one sentence"}.'
     )
     text = getattr(chat(prompt, image_path=record.photos[-1]), "content", "") or ""
     try:
@@ -146,9 +154,69 @@ def withdraw_finding(record, finding_id, reason):
 
 
 def dismiss_part(record, part, reason):
-    if part not in load_prices():
-        return {"error": f"unknown part '{part}'"}
+    if part not in load_prices() and part not in HIDDEN_AREAS and part not in ("front", "rear", "left", "right"):
+        return {"error": f"unknown part, area, or side '{part}'"}
     return {"dismissed": record.add_dismissal(part, reason)}
+
+
+def flag_hidden_damage(record, area, reason):
+    if area not in HIDDEN_AREAS:
+        return {"error": f"unknown area '{area}'. Use one of: {HIDDEN_AREAS}"}
+    return {"flagged": record.add_flag(area, reason)}
+
+
+SIDES = ["front", "rear", "left", "right"]
+TRIAGE = ["clear_damage", "possible_minor", "no_damage"]
+
+
+def _side_of(record, photo):
+    for side, info in (record.sides or {}).items():
+        if info.get("photo") == photo:
+            return side
+    return None
+
+
+def select_frames(record):
+    frames = record.frames or []
+    if not frames:
+        return {"error": "no video frames on this claim"}
+    prompt = (
+        f"You are a vehicle damage inspector. These {len(frames)} frames come from a walkaround video, "
+        f"in order, indexed 0 to {len(frames) - 1}. For each visible car side (front, rear, left, right), "
+        "pick the single best frame index and triage it: clear_damage, possible_minor, or no_damage. "
+        'Return ONLY JSON: {"sides": {"front": {"frame": 0, "triage": "clear_damage"}, ...}}.'
+    )
+    text = getattr(chat(prompt, images=frames), "content", "") or ""
+    try:
+        j = _parse_json(text)
+    except Exception as e:
+        return {"error": f"bad JSON: {e}", "raw": text[:300]}
+    picked = {}
+    for side, info in (j.get("sides") or {}).items():
+        if side not in SIDES:
+            return {"error": f"bad side '{side}'", "raw": text[:300]}
+        try:
+            idx = int(info.get("frame"))
+        except (TypeError, ValueError):
+            return {"error": f"bad frame index for '{side}'", "raw": text[:300]}
+        if not 0 <= idx < len(frames) or info.get("triage") not in TRIAGE:
+            return {"error": f"bad frame/triage for '{side}'", "raw": text[:300]}
+        picked[side] = {"frame": idx, "photo": frames[idx], "triage": info["triage"]}
+    if not picked:
+        return {"error": "no sides selected", "raw": text[:300]}
+    record.sides = picked
+    for side in SIDES:
+        if side in picked:
+            record.add_photo(picked[side]["photo"])
+    return {"sides": picked}
+
+
+def mark_possible_damage(record, part_id, reason):
+    try:
+        entry = record.add_possible(part_id, reason)
+    except ValueError as e:
+        return {"error": str(e)}
+    return {"marked": entry}
 
 
 DISPATCH = {
@@ -162,4 +230,7 @@ DISPATCH = {
     "record_missing_part": record_missing_part,
     "dismiss_part": dismiss_part,
     "withdraw_finding": withdraw_finding,
+    "flag_hidden_damage": flag_hidden_damage,
+    "select_frames": select_frames,
+    "mark_possible_damage": mark_possible_damage,
 }

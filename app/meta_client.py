@@ -26,10 +26,12 @@ def _data_url(image_path):
     return f"data:{mime};base64,{b64}"
 
 
-def chat(prompt, image_path=None, tools=None, model=CHAT_MODEL, system=None, tool_choice=None):
+def chat(prompt, image_path=None, tools=None, model=CHAT_MODEL, system=None, tool_choice=None, images=None):
     content = [{"type": "text", "text": prompt}]
     if image_path:
         content.append({"type": "image_url", "image_url": {"url": _data_url(image_path)}})
+    for p in images or []:
+        content.append({"type": "image_url", "image_url": {"url": _data_url(p)}})
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
