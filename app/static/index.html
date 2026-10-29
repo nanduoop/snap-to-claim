@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snap-to-Claim</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 -apple-system, system-ui, sans-serif; background: #f6f8fa; color: #1f2328; }
+header { display: flex; gap: 10px; align-items: center; padding: 8px 16px; background: #fff; border-bottom: 1px solid #d0d7de; flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0 8px 0 0; }
+header .spacer { flex: 1; }
+main { display: grid; grid-template-columns: minmax(360px, 5fr) minmax(340px, 4fr) minmax(300px, 3fr); gap: 12px; padding: 12px; max-width: 1560px; margin: 0 auto; align-items: start; }
+section { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 10px 12px; }
+section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #57606a; margin: 0 0 8px; }
+canvas { width: 100%; border-radius: 6px; background: #eee; cursor: pointer; display: block; }
+#feed { display: flex; flex-direction: column; gap: 8px; max-height: 78vh; overflow: auto; }
+.card { border: 1px solid #d0d7de; border-radius: 6px; padding: 6px 8px; font-size: 12.5px; }
+.card .t { font-weight: 600; color: #57606a; }
+.card pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 11.5px; background: #f6f8fa; padding: 4px 6px; border-radius: 4px; max-height: 160px; overflow: auto; }
+.card.refused { border-color: #cf222e; background: #ffebe9; }
+.card .prob { color: #cf222e; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-weight: 600; font-size: 12.5px; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #eee; }
+.ba { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ba img { width: 100%; border-radius: 6px; border: 1px solid #d0d7de; }
+.ba p { margin: 2px 0 6px; font-size: 11.5px; color: #57606a; }
+button { padding: 4px 12px; border-radius: 6px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; }
+button.primary { background: #1a7f37; color: #fff; border-color: #1a7f37; }
+button.danger { background: #cf222e; color: #fff; border-color: #cf222e; }
+textarea { width: 100%; min-height: 56px; border-radius: 6px; border: 1px solid #d0d7de; padding: 6px; font: inherit; margin: 6px 0; }
+#missing { margin: 0 0 8px; padding-left: 20px; }
+#missing li { font-size: 12.5px; }
+#partDetail img { width: 100%; border-radius: 6px; border: 1px solid #d0d7de; }
+.muted { color: #57606a; font-size: 12px; }
+input[type=text] { padding: 4px 8px; border-radius: 6px; border: 1px solid #d0d7de; }
+</style>
+</head>
+<body>
+<header>
+<h1>Snap-to-Claim</h1>
+<span id="claimLabel" class="muted">no claim</span>
+<span class="spacer"></span>
+<input type="file" id="newFile" accept="image/*">
+<button id="startBtn">Start new claim</button>
+<input type="text" id="claimInput" placeholder="claim id" size="10">
+<button id="loadBtn">Load</button>
+</header>
+<main>
+<section>
+<h2>Evidence</h2>
+<canvas id="photo"></canvas>
+<p id="photoNote" class="muted"></p>
+<h2>Missing parts</h2>
+<ul id="missing"></ul>
+<div id="partDetail"></div>
+</section>
+<section>
+<h2>Turns</h2>
+<div id="runState" class="muted"></div>
+<div id="feed"></div>
+</section>
+<section>
+<h2>Claim</h2>
+<p>Status: <span id="badge" class="badge">—</span></p>
+<table><thead><tr><th>Part</th><th>Damage</th><th>Sev</th><th>USD</th></tr></thead><tbody id="items"></tbody></table>
+<p id="totals"></p>
+<h2>Before / After</h2>
+<div class="ba"><div><img id="beforeImg" alt="before"><p>before</p></div><div><img id="afterImg" alt="after"><p>after</p></div></div>
+<div id="adjuster" style="display:none">
+<h2>Adjuster sign-off</h2>
+<button id="approveBtn" class="primary">Approve</button>
+<textarea id="rejectNotes" placeholder="Rejection notes for the agent"></textarea>
+<button id="rejectBtn" class="danger">Reject &amp; resume</button>
+</div>
+<div id="needsInput" style="display:none">
+<h2>More evidence needed</h2>
+<p id="needReason" class="muted"></p>
+<input type="file" id="moreFile" accept="image/*">
+<button id="moreBtn">Upload &amp; resume</button>
+</div>
+</section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const COLORS = {running:['#ddf4ff','#0969da'],needs_input:['#fff8c5','#9a6700'],awaiting_signoff:['#fbefff','#8250df'],escalated:['#ffebe9','#cf222e'],approved:['#dafbe1','#1a7f37'],max_turns:['#eaeef2','#57606a']};
+
+let claimId = new URLSearchParams(location.search).get('claim') || '';
+let shownSrc = '', lastBoxes = [];
+let view = {rec: null, parts: [], color: {}, insp: {}};
+const img = new Image();
+img.onload = drawPhoto;
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error((await r.text()).slice(0, 200));
+  return r.json();
+}
+
+function setClaim(id) {
+  claimId = id;
+  history.replaceState(null, '', location.pathname + '?claim=' + encodeURIComponent(id));
+  $('claimLabel').textContent = 'claim ' + id;
+  $('partDetail').innerHTML = '';
+  shownSrc = '';
+  loadClaim();
+}
+
+async function loadClaim() {
+  if (!claimId) return;
+  try {
+    render(await api('/claims/' + encodeURIComponent(claimId)));
+  } catch (e) {
+    $('runState').textContent = 'waiting for run to start… (' + e.message.slice(0, 80) + ')';
+  }
+}
+
+function render(d) {
+  const rec = d.record;
+  const [bg, fg] = COLORS[d.status] || COLORS.max_turns;
+  const badge = $('badge');
+  badge.textContent = d.status + (d.running ? ' · running' : '');
+  badge.style.background = bg; badge.style.color = fg;
+  $('runState').textContent = d.error ? 'error: ' + d.error : (d.running ? `agent running… turn ${d.turn}` : `${d.turn} turns`);
+  renderPhoto(rec, d.history);
+  renderFeed(d.history);
+  renderItems(rec);
+  const b = $('beforeImg');
+  const bu = rec.photos.length ? `/claims/${claimId}/photo/0` : '';
+  if (b.dataset.u !== bu) { b.dataset.u = bu; b.src = bu; }
+  const a = $('afterImg');
+  if (rec.preview) {
+    const au = `/claims/${claimId}/preview`;
+    if (a.dataset.u !== au) { a.dataset.u = au; a.src = au; }
+    a.style.display = '';
+  } else {
+    a.style.display = 'none';
+  }
+  $('adjuster').style.display = ((d.status === 'awaiting_signoff' || d.status === 'escalated') && !d.running) ? '' : 'none';
+  const needy = d.status === 'needs_input' && !d.running;
+  $('needsInput').style.display = needy ? '' : 'none';
+  if (needy) $('needReason').textContent = rec.evidence_request || '';
+}
+
+function renderPhoto(rec, hist) {
+  const n = rec.photos.length;
+  if (!n) return;
+  const insp = {};
+  for (const h of hist) {
+    const o = h.observe || {};
+    if (o && typeof o === 'object' && o.part_id && 'damaged' in o) insp[o.part_id] = o;
+  }
+  const color = {};
+  for (const p of rec.parts) {
+    if ((rec.findings || []).some(f => f.part_id === p.id)) color[p.id] = '#e5484d';
+    else if (insp[p.id] && insp[p.id].damaged === false) color[p.id] = '#46a758';
+  }
+  view = {rec, parts: rec.parts.filter(p => p.box && (n === 1 || p.photo === rec.photos[n - 1])), color, insp};
+  const src = `/claims/${claimId}/photo/${n - 1}`;
+  if (src !== shownSrc) { shownSrc = src; img.src = src; } else drawPhoto();
+  const miss = rec.parts.filter(p => !p.box);
+  $('missing').innerHTML = miss.length ? miss.map(p => {
+    const f = (rec.findings || []).find(x => x.part_id === p.id);
+    return `<li><b>${esc(p.concept)}${p.position ? ' ' + esc(p.position) : ''}</b> — ${esc(f ? f.rationale : 'recorded missing')}</li>`;
+  }).join('') : '<li class="muted">none</li>';
+}
+
+function drawPhoto() {
+  const c = $('photo'), rec = view.rec;
+  if (!rec || !img.naturalWidth) return;
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const x = c.getContext('2d');
+  x.drawImage(img, 0, 0);
+  lastBoxes = [];
+  for (const p of view.parts) {
+    const b = p.box, sx = c.width / (b.w || c.width), sy = c.height / (b.h || c.height);
+    const r = {x1: b.x1 * sx, y1: b.y1 * sy, x2: b.x2 * sx, y2: b.y2 * sy, part: p};
+    x.strokeStyle = view.color[p.id] || '#8b8d98'; x.lineWidth = 3;
+    x.strokeRect(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1);
+    x.fillStyle = x.strokeStyle; x.font = '14px sans-serif';
+    x.fillText(p.concept + (p.position ? ' ' + p.position : ''), r.x1 + 4, r.y1 + 16);
+    lastBoxes.push(r);
+  }
+  $('photoNote').textContent = `${view.parts.length} boxes · photo ${rec.photos.length} of ${rec.photos.length} · click a box`;
+}
+
+function showDetail(p) {
+  const el = $('partDetail');
+  if (!p) { el.innerHTML = ''; return; }
+  const rec = view.rec;
+  const f = (rec.findings || []).find(x => x.part_id === p.id);
+  const o = view.insp[p.id] || {};
+  const dmg = f ? `${esc(f.damage)}, ${esc(f.severity)}` : 'intact / unknown';
+  const why = f ? f.rationale : (o.rationale || 'not inspected yet');
+  el.innerHTML = `<h2>${esc(p.concept)}${p.position ? ' ' + esc(p.position) : ''} (${esc(p.id)})</h2>` +
+    `<img src="/claims/${claimId}/crop/${p.id}" alt="crop" onerror="this.remove()">` +
+    `<p><b>${dmg}</b> — ${esc(why)}</p>`;
+}
+
+function renderFeed(hist) {
+  const feed = $('feed');
+  const stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 120;
+  feed.innerHTML = hist.map(h => {
+    const o = h.observe;
+    const refused = o && o.status === 'refused';
+    let obs = `<pre>${esc(typeof o === 'string' ? o : JSON.stringify(o, null, 1))}</pre>`;
+    if (refused) obs = (o.problems || []).map(p => `<div class="prob"><b>${esc(p.code)}</b> ${esc(p.detail)}</div>`).join('') + obs;
+    return `<div class="card${refused ? ' refused' : ''}"><span class="t">Turn ${h.turn}</span><br>PLAN: ${esc(h.plan)}<br>ACT: <code>${esc(h.act)}</code>${obs}</div>`;
+  }).join('') || '<p class="muted">no turns yet</p>';
+  if (stick) feed.scrollTop = feed.scrollHeight;
+}
+
+function renderItems(rec) {
+  const items = rec.line_items || [];
+  $('items').innerHTML = items.map(i => `<tr><td>${esc(i.part)}</td><td>${esc(i.damage)}</td><td>${esc(i.severity)}</td><td>$${i.low}–$${i.high}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">none yet</td></tr>';
+  const lo = items.reduce((a, i) => a + i.low, 0), hi = items.reduce((a, i) => a + i.high, 0);
+  $('totals').innerHTML = items.length ? `<b>Total: $${lo}–$${hi}</b>` : '';
+}
+
+$('photo').addEventListener('click', e => {
+  const c = $('photo'), r = c.getBoundingClientRect(), s = c.width / r.width;
+  const px = (e.clientX - r.left) * s, py = (e.clientY - r.top) * s;
+  const hit = [...lastBoxes].reverse().find(b => px >= b.x1 && px <= b.x2 && py >= b.y1 && py <= b.y2);
+  showDetail(hit ? hit.part : null);
+});
+$('startBtn').onclick = async () => {
+  const f = $('newFile').files[0];
+  if (!f) return alert('choose a photo');
+  const fd = new FormData(); fd.append('file', f);
+  try { setClaim((await api('/claims', {method: 'POST', body: fd})).claim_id); }
+  catch (e) { alert(e.message); }
+};
+$('loadBtn').onclick = () => { const v = $('claimInput').value.trim(); if (v) setClaim(v); };
+$('approveBtn').onclick = async () => { await api(`/claims/${claimId}/approve`, {method: 'POST'}); loadClaim(); };
+$('rejectBtn').onclick = async () => {
+  const notes = $('rejectNotes').value;
+  if (!notes.trim()) return alert('notes required');
+  const fd = new FormData(); fd.append('notes', notes);
+  await api(`/claims/${claimId}/reject`, {method: 'POST', body: fd});
+  $('rejectNotes').value = '';
+  loadClaim();
+};
+$('moreBtn').onclick = async () => {
+  const f = $('moreFile').files[0];
+  if (!f) return alert('choose a photo');
+  const fd = new FormData(); fd.append('file', f);
+  await api(`/claims/${claimId}/photo`, {method: 'POST', body: fd});
+  loadClaim();
+};
+
+if (claimId) { $('claimLabel').textContent = 'claim ' + claimId; loadClaim(); }
+setInterval(loadClaim, 1500);
+</script>
+</body>
+</html>

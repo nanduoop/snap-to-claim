@@ -48,6 +48,9 @@ def _save_state(path, claim_id, turn, status, history, record):
 def _run_loop(claim_id, record, history, turn, max_turns, on_turn):
     state_path = os.path.join(STATE_DIR, f"{claim_id}.json")
     crop_dir = os.path.join(STATE_DIR, "crops", claim_id)
+    claim_dir = os.path.join(STATE_DIR, claim_id)
+    os.makedirs(claim_dir, exist_ok=True)
+    preview_path = os.path.join(claim_dir, "repaired.png")
     status = "running"
     while turn < max_turns:
         turn += 1
@@ -82,6 +85,9 @@ def _run_loop(claim_id, record, history, turn, max_turns, on_turn):
                 try:
                     if name == "inspect_part":
                         observe = DISPATCH[name](record, crop_dir=crop_dir, **args)
+                    elif name == "render_repair_preview":
+                        args.pop("out_path", None)
+                        observe = DISPATCH[name](record, out_path=preview_path)
                     else:
                         observe = DISPATCH[name](record, **args)
                 except TypeError as e:
